@@ -58,6 +58,7 @@ def load_data():
 
     return testloader
 
+
 def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f_param=0.5,criterium="paper",pixel_number=1):
 
     list_pert_samples=[]
@@ -65,8 +66,9 @@ def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f
 
     soft=nn.Softmax()
 
-    for data,targets in sample_loader:
+    sample_count = 0
 
+    for data,targets in sample_loader:
 
         #draw the coordinates and rgb-values of the agents from random
         coords_old=np.random.random_integers(0,data.size()[-1], (pop_size,pixel_number,2))
@@ -76,20 +78,23 @@ def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f
         rgb_new = np.zeros((pop_size, pixel_number, 3))
         #set iterator to zero
         iteration = 0
+        found_candidate = False
+        data_purb = 0
 
         while iteration < 100:
 
             for i in range(pop_size):
 
                 data_purb=data.clone()
-                data_purb[0,:,coords_old[i,:,0],coords_old[i,:,1]]+=torch.tensor(rgb_old[i].transpose(),dtype=torch.float)
+                data_purb[0, :, coords_old[i, :, 0], coords_old[i, :, 1]] += torch.tensor(rgb_old[i].transpose(), dtype=torch.float)
 
                 # softmax
-                score=soft(NeuralNet(data_purb))
+                score = soft(NeuralNet(data_purb))
 
-                true_score=score[0,targets]
+                true_score = score[0, targets]
 
                 if true_score < 0.05:
+                    found_candidate = True
                     list_iterations.append(iteration)
                     list_pert_samples.append(data_purb)
                     break
@@ -99,16 +104,26 @@ def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f
                 coords_new[i] = coords_old[r1] + f_param*(coords_old[r2] + coords_old[r3])
                 rgb_new[i] = rgb_old[r1] + f_param * (rgb_old[r2] + rgb_old[r3])
 
+            if found_candidate:
+                break
+
             coords_old = coords_new.copy()
             rgb_old = rgb_new.copy()
 
-            iteration+=1
+            iteration += 1
+
+        if found_candidate == False:
+            list_pert_samples.append(data_purb)
+            list_iterations.append(iteration)
+
+        sample_count += 1
+        if sample_count>600:
+            break
+
+    return list_pert_samples, list_iterations
 
 
-
-
-
-
-resnet18, alexnet, squeezenet, vgg16, densenet, inception=load_all_NN()
+resnet18, alexnet, squeezenet, vgg16, densenet, inception = load_all_NN()
 data=load_imagenet()
-perturbator_3001(alexnet,data)
+pert_samples, iterations = perturbator_3001(alexnet,data,5)
+print("hi")
