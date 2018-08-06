@@ -24,8 +24,12 @@ def load_imagenet():
     import torchvision.datasets as datasets
     # Data loading code
     valdir = os.path.join("../","val/")
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+
+    # normally, we would use this transformation for our pretrained nets
+    # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+    # use this transformation to have RGB values in [0, 255], transform as above later on
+    normalize = transforms.Normalize(mean=[0, 0, 0], std=[1./255., 1./255., 1./255.])
 
     val_dataset = datasets.ImageFolder(
         valdir,
@@ -35,31 +39,12 @@ def load_imagenet():
             transforms.ToTensor(),
             normalize,
         ]))
-    valloader = torch.utils.data.DataLoader(val_dataset, batch_size=1,
-                                              shuffle=True, num_workers=2)
+    valloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=2)
     return valloader
 
-def load_data():
-    transform = transforms.Compose(
-        [transforms.ToTensor(),
-         transforms.Normalize(mean=[0., 0., 0.],
-                              std=[1./255., 1./255., 1./255.])])
 
-
-    trainset = torchvision.datasets.CIFAR10(root='./cifar-10-batches-py', train=True,
-                                            download=True,transform=transform)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=1,
-                                              shuffle=True, num_workers=2)
-
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
-                                           download=True,transform=transform)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=1,
-                                             shuffle=False, num_workers=2)
-
-    return testloader
-
-
-def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f_param=0.5,criterium="paper",pixel_number=1):
+def perturbator_3001(NeuralNet ,sample_loader, pop_size=400, max_iterations=100, f_param=0.5, criterium="paper",
+                     pixel_number=1):
 
     list_pert_samples=[]
     list_iterations=[]
@@ -68,15 +53,15 @@ def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f
 
     sample_count = 0
 
-    for data,targets in sample_loader:
+    for data, target in sample_loader:
 
-        #draw the coordinates and rgb-values of the agents from random
-        coords_old=np.random.random_integers(0,data.size()[-1], (pop_size,pixel_number,2))
-        rgb_old=np.random.normal(128,127,(pop_size,pixel_number, 3))
-        #initialize agents of next iteration
+        # draw the coordinates and rgb-values of the agents from random
+        coords_old = np.random.random_integers(0,data.size()[-1]-1, (pop_size,pixel_number,2))
+        rgb_old = np.random.normal(128,127,(pop_size,pixel_number, 3))
+        # initialize agents of next iteration
         coords_new = np.zeros((pop_size,pixel_number,2))
         rgb_new = np.zeros((pop_size, pixel_number, 3))
-        #set iterator to zero
+        # set iterator to zero
         iteration = 0
         found_candidate = False
         data_purb = 0
@@ -86,12 +71,16 @@ def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f
             for i in range(pop_size):
 
                 data_purb=data.clone()
-                data_purb[0, :, coords_old[i, :, 0], coords_old[i, :, 1]] += torch.tensor(rgb_old[i].transpose(), dtype=torch.float)
+                data_purb[0, :, coords_old[i, :, 0], coords_old[i, :, 1]] = data_purb[0, :, coords_old[i, :, 0]
+                , coords_old[i, :, 1]] = torch.tensor(rgb_old[i].transpose(), dtype=torch.float) % 255
+
+                data_purb[0, 0] = (data_purb[0, 0]/255. - 0.485) / 0.229
+                data_purb[0, 1] = (data_purb[0, 0]/255. - 0.456) / 0.224
+                data_purb[0, 2] = (data_purb[0, 0]/255. - 0.406) / 0.225
 
                 # softmax
                 score = soft(NeuralNet(data_purb))
-
-                true_score = score[0, targets]
+                true_score = score[0, target]
 
                 if true_score < 0.05:
                     found_candidate = True
@@ -99,10 +88,11 @@ def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f
                     list_pert_samples.append(data_purb)
                     break
 
-                #DE update agents
+                # DE update agents
                 r1, r2, r3 = np.random.choice(range(pop_size), 3, replace=False)
-                coords_new[i] = coords_old[r1] + f_param*(coords_old[r2] + coords_old[r3])
-                rgb_new[i] = rgb_old[r1] + f_param * (rgb_old[r2] + rgb_old[r3])
+                coords_new[i] = (coords_old[r1] + f_param*(coords_old[r2] + coords_old[r3])).astype(int) \
+                                % data.size()[-1]
+                rgb_new[i] = (rgb_old[r1] + f_param * (rgb_old[r2] + rgb_old[r3])) % 255
 
             if found_candidate:
                 break
@@ -112,7 +102,7 @@ def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f
 
             iteration += 1
 
-        if found_candidate == False:
+        if not found_candidate:
             list_pert_samples.append(data_purb)
             list_iterations.append(iteration)
 
@@ -123,7 +113,8 @@ def perturbator_3001(NeuralNet,sample_loader, pop_size=400,max_iterations=100, f
     return list_pert_samples, list_iterations
 
 
-resnet18, alexnet, squeezenet, vgg16, densenet, inception = load_all_NN()
-data=load_imagenet()
-pert_samples, iterations = perturbator_3001(alexnet,data,5)
-print("hi")
+if __name__ ==  '__main__':
+    resnet18, alexnet, squeezenet, vgg16, densenet, inception = load_all_NN()
+    data=load_imagenet()
+    pert_samples, iterations = perturbator_3001(alexnet, data, 5)
+    print("hi")
